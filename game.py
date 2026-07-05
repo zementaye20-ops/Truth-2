@@ -44,8 +44,8 @@ class Phase(str, Enum):
 
 
 MAX_STATEMENT_LEN = 200
-DEFAULT_SUBMISSION_TIMER = 90
-DEFAULT_VOTING_TIMER = 45
+DEFAULT_SUBMISSION_TIMER = 180   # 3 minutes to send 2 truths + 1 lie
+DEFAULT_VOTING_TIMER = 90        # 90 seconds to vote
 LOBBY_AUTOCANCEL_SECONDS = 5 * 60
 
 
@@ -80,7 +80,8 @@ class GameState:
         "submission_timer": DEFAULT_SUBMISSION_TIMER,
         "voting_timer": DEFAULT_VOTING_TIMER,
         "min_players": 3,
-        "theme": None,          # e.g. "embarrassing moments" — included in the submission prompt
+        "theme": None,
+        "rounds_per_player": 1,   # how many full rotations through all players
     })
 
     turn_order: list = field(default_factory=list)      # list of user_ids, consumed as rounds complete
@@ -162,7 +163,8 @@ class GameState:
     def start_rounds(self):
         ids = [uid for uid, p in self.players.items() if not p.get("spectator")]
         random.shuffle(ids)
-        self.turn_order = ids
+        rounds = self.settings.get("rounds_per_player", 1)
+        self.turn_order = ids * rounds
         self.current_turn_idx = 0
         self.completed_turn_order = []
 
