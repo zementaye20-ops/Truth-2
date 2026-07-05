@@ -990,7 +990,68 @@ async def register_commands(app: Application):
 
 async def on_startup(app: Application):
     await register_commands(app)
-    await recover_games(app)
+    # Reload any in-progress games that were running before a restart.
+    for chat_id in db.list_snapshot_chat_ids():
+        data = db.load_snapshot(chat_id)
+        if not data:
+            continue
+        gs = GameState.from_dict(data)
+        if gs.phase == Phase.LOBBY.value:
+            db.delete_snapshot(chat_id)
+            continue
+        manager.games[chat_id] = gs
+        for uid in gs.players:
+            _dm_user_to_chat[uid] = chat_id
+        if gs.phase == Phase.SUBMISSION.value:
+            player_id = gs.submitting_player_id
+            gs.submission_deadline = time.time() + gs.settings["submission_timer"]
+            persist(gs)
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"🔄 I restarted after a hiccup — resuming "
+                    f"{gs.players.get(player_id, {}).get('username', 'the current player')}'s submission "
+                    f"with a fresh {gs.settings['submission_timer']}s timer. Anything they already sent is still saved."
+                ),
+            )
+            app.create_task(
+                _timer_loop(
+                    _ctx_shim(app), chat_id, Phase.SUBMISSION.value, "submission_deadline",
+                    PING_TIMES_SUBMISSION,
+                    completion_fn=lambda g: g.submission_complete() and g.submitting_player_id == player_id,
+                    on_ping=lambda g, secs: safe_dm(_ctx_shim(app), player_id, f"⏱️ {secs}s left to finish your 3 statements!"),
+                    on_timeout=lambda g, completed: _submission_timeout(_ctx_shim(app), chat_id, player_id, completed),
+                )
+            )
+        elif gs.phase == Phase.TAGGING.value:
+            player_id = gs.submitting_player_id
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"🔄 I restarted — {gs.players.get(player_id, {}).get('username', 'the current player')}, "
+                    f"check your DMs! I've re-sent you the prompt to pick which statement was your lie."
+                ),
+            )
+            await proceed_to_lie_tagging(_ctx_shim(app), chat_id)
+        elif gs.phase == Phase.VOTING.value:
+            gs.voting_deadline = time.time() + gs.settings["voting_timer"]
+            persist(gs)
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=f"🔄 I restarted after a hiccup — resuming voting with a fresh {gs.settings['voting_timer']}s timer. Votes already cast are still counted."
+            )
+            app.create_task(
+                _timer_loop(
+                    _ctx_shim(app), chat_id, Phase.VOTING.value, "voting_deadline",
+                    PING_TIMES_VOTING,
+                    completion_fn=lambda g: g.all_voted(),
+                    on_ping=lambda g, secs: app.bot.send_message(chat_id, f"⏰ {secs}s left to vote!"),
+                    on_timeout=lambda g, completed: _voting_timeout(_ctx_shim(app), chat_id, completed),
+                )
+            )
+        else:
+            await app.bot.send_message(chat_id, "🔄 Bot restarted — game state restored, continuing where we left off.")
+        logger.info("Recovered game for chat %s in phase %s", chat_id, gs.phase)
     for chat_id in db.list_snapshot_chat_ids():
         data = db.load_snapshot(chat_id)
         if not data:
