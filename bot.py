@@ -227,25 +227,34 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("Submission: 60s", callback_data="set_sub_60"),
-            InlineKeyboardButton("90s", callback_data="set_sub_90"),
-            InlineKeyboardButton("120s", callback_data="set_sub_120"),
+            InlineKeyboardButton("Submission: 90s",  callback_data="set_sub_90"),
+            InlineKeyboardButton("2 min",            callback_data="set_sub_120"),
+            InlineKeyboardButton("3 min",            callback_data="set_sub_180"),
+            InlineKeyboardButton("5 min",            callback_data="set_sub_300"),
         ],
         [
-            InlineKeyboardButton("Voting: 30s", callback_data="set_vote_30"),
-            InlineKeyboardButton("45s", callback_data="set_vote_45"),
-            InlineKeyboardButton("60s", callback_data="set_vote_60"),
+            InlineKeyboardButton("Voting: 45s",  callback_data="set_vote_45"),
+            InlineKeyboardButton("90s",          callback_data="set_vote_90"),
+            InlineKeyboardButton("2 min",        callback_data="set_vote_120"),
         ],
         [
             InlineKeyboardButton("Min players: 3", callback_data="set_min_3"),
-            InlineKeyboardButton("4", callback_data="set_min_4"),
-            InlineKeyboardButton("5", callback_data="set_min_5"),
+            InlineKeyboardButton("4",              callback_data="set_min_4"),
+            InlineKeyboardButton("5",              callback_data="set_min_5"),
+        ],
+        [
+            InlineKeyboardButton("Rounds: 1", callback_data="set_rounds_1"),
+            InlineKeyboardButton("2",         callback_data="set_rounds_2"),
+            InlineKeyboardButton("3",         callback_data="set_rounds_3"),
+            InlineKeyboardButton("5",         callback_data="set_rounds_5"),
         ],
     ]
     theme_line = f"Theme: {gs.settings['theme']}" if gs.settings.get("theme") else "Theme: none (use /theme <text> to set one)"
+    rounds = gs.settings.get("rounds_per_player", 1)
     await update.message.reply_text(
         f"Current settings — submission: {gs.settings['submission_timer']}s, "
-        f"voting: {gs.settings['voting_timer']}s, min players: {gs.settings['min_players']}.\n"
+        f"voting: {gs.settings['voting_timer']}s, min players: {gs.settings['min_players']}, "
+        f"rounds per player: {rounds}.\n"
         f"{theme_line}\nTap to change:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
@@ -290,11 +299,15 @@ async def cb_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gs.settings["voting_timer"] = int(data.split("_")[-1])
     elif data.startswith("set_min_"):
         gs.settings["min_players"] = int(data.split("_")[-1])
+    elif data.startswith("set_rounds_"):
+        gs.settings["rounds_per_player"] = int(data.split("_")[-1])
     persist(gs)
     await query.answer("Updated.")
+    rounds = gs.settings.get("rounds_per_player", 1)
     await query.edit_message_text(
         f"Settings updated — submission: {gs.settings['submission_timer']}s, "
-        f"voting: {gs.settings['voting_timer']}s, min players: {gs.settings['min_players']}."
+        f"voting: {gs.settings['voting_timer']}s, min players: {gs.settings['min_players']}, "
+        f"rounds per player: {rounds}."
     )
 
 
@@ -320,8 +333,10 @@ async def cmd_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gs.start_rounds()
     for uid in gs.players:
         _dm_user_to_chat[uid] = chat_id
-    names = ", ".join(gs.players[uid]["username"] for uid in gs.turn_order)
-    await update.message.reply_text(f"🎲 Game starting! Turn order: {names}")
+    rounds = gs.settings.get("rounds_per_player", 1)
+    names = ", ".join(gs.players[uid]["username"] for uid in gs.turn_order[:len(gs.players)])
+    rounds_note = f" ({rounds} round{'s' if rounds > 1 else ''} each)" if rounds > 1 else ""
+    await update.message.reply_text(f"🎲 Game starting{rounds_note}! Turn order: {names}")
     persist(gs)
     await start_next_round(update, context, chat_id)
 
@@ -1169,7 +1184,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
 
-    app.add_handler(CallbackQueryHandler(cb_settings, pattern=r"^set_(sub|vote|min)_\d+$"))
+    app.add_handler(CallbackQueryHandler(cb_settings, pattern=r"^set_(sub|vote|min|rounds)_\d+$"))
     app.add_handler(CallbackQueryHandler(cb_tag_lie, pattern=r"^tag_lie_\d$"))
     app.add_handler(CallbackQueryHandler(cb_double_down, pattern=r"^dd_(yes|no)$"))
     app.add_handler(CallbackQueryHandler(cb_vote, pattern=r"^vote_\d_\d$"))
