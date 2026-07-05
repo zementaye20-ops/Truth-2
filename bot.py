@@ -960,8 +960,10 @@ async def _timer_loop(context, chat_id, phase_name, deadline_attr, ping_seconds,
 
 async def register_commands(app: Application):
     """Register the command list with Telegram so the bot appears in the /
-    autocomplete menu in every chat it's in."""
+    autocomplete menu. Safe to skip if rate-limited — commands persist from
+    the last successful registration."""
     from telegram import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+    from telegram.error import RetryAfter
     group_commands = [
         BotCommand("newgame",  "Open a new lobby"),
         BotCommand("join",     "Join the lobby or game as a spectator"),
@@ -983,9 +985,17 @@ async def register_commands(app: Application):
         BotCommand("score", "All-time leaderboard"),
         BotCommand("stats", "Your personal lifetime stats"),
     ]
-    await app.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
-    await app.bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
-    logger.info("Registered bot commands with Telegram.")
+    try:
+        await app.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+        await app.bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+        logger.info("Registered bot commands with Telegram.")
+    except RetryAfter as e:
+        logger.warning(
+            "Telegram rate-limited setMyCommands (retry in %ss) — skipping this startup. "
+            "Commands from the last successful registration are still active.", e.retry_after
+        )
+    except Exception as e:
+        logger.warning("Could not register commands: %s — continuing anyway.", e)
 
 
 async def on_startup(app: Application):
